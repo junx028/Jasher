@@ -2,6 +2,9 @@ const fetch = require('node-fetch');
 
 // ==================== CONFIG ====================
 const BOT_TOKEN = process.env.BOT_TOKEN;
+// Ekstrak ID Bot dari Token untuk akurasi deteksi grup 100%
+const BOT_ID = BOT_TOKEN ? BOT_TOKEN.split(':')[0] : ''; 
+
 const OWNER_IDS = (process.env.OWNER_IDS || '').split(',').map(id => id.trim());
 const CHANNEL_USERNAME = process.env.CHANNEL_USERNAME || '@LeguminY';
 const DEVELOPER = process.env.DEVELOPER || '@xnecz';
@@ -9,7 +12,12 @@ const GIST_ID = process.env.GIST_ID;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GIST_API = `https://api.github.com/gists/${GIST_ID}`;
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
-const VERCEL_URL = 'https://veldora-jasher.vercel.app';
+const VERCEL_URL = process.env.VERCEL_URL || 'https://limit-bot.vercel.app';
+
+// ==================== FAKE STATS SETTINGS ====================
+// Angka dasar yang akan ditambah dengan jumlah aslinya agar terlihat ramai
+const FAKE_USERS = 560;
+const FAKE_GROUPS = 247;
 
 // ==================== DATABASE ====================
 async function getDB() {
@@ -64,12 +72,7 @@ function initDB() {
 async function sendMsg(chatId, text, replyMarkup = null) {
     try {
         const payload = { chat_id: chatId, text: text, parse_mode: 'HTML' };
-        
-        // PERBAIKAN: API Telegram menolak double-stringify. 
-        // payload sudah di-stringify di bawah, jadi replyMarkup jangan di-stringify lagi di sini.
-        if (replyMarkup) {
-            payload.reply_markup = replyMarkup;
-        }
+        if (replyMarkup) payload.reply_markup = replyMarkup;
         
         const response = await fetch(`${TELEGRAM_API}/sendMessage`, {
             method: 'POST', 
@@ -78,11 +81,8 @@ async function sendMsg(chatId, text, replyMarkup = null) {
         });
         
         const data = await response.json();
-        if (!data.ok) console.error("Error SendMsg API:", data.description);
-        
         return data;
     } catch (error) { 
-        console.error("Fetch Error sendMsg:", error.message);
         return false; 
     }
 }
@@ -114,12 +114,11 @@ async function checkChannel(userId) {
             body: JSON.stringify({ chat_id: CHANNEL_USERNAME, user_id: userId })
         });
         const data = await res.json();
-        // Kalau channelnya nggak ada/bot belum admin, izinkan masuk biar bot gak diam
         if (!data.ok) return true; 
         
         return ['member', 'administrator', 'creator'].includes(data.result?.status);
     } catch (error) { 
-        return true; // Bypass kalau API sedang gangguan
+        return true; 
     }
 }
 
@@ -146,7 +145,6 @@ function progressBar(p) {
 }
 
 // ==================== AUTO SHARE STORAGE ====================
-// Berjalan di Memory Server / VPS 
 const autoShares = {};
 
 // ==================== MAIN HANDLER ====================
@@ -157,6 +155,66 @@ module.exports = async (req, res) => {
 
     const body = req.body;
     const db = await getDB();
+
+    // ==================== 1. DETEKSI BOT DITAMBAHKAN KE GRUP (MY_CHAT_MEMBER) ====================
+    // Ini adalah metode paling agresif & akurat untuk mendeteksi grup baru
+    if (body.my_chat_member) {
+        const myMember = body.my_chat_member;
+        const chatId = myMember.chat.id;
+        const chatTitle = myMember.chat.title || 'Grup';
+        const newStatus = myMember.new_chat_member.status;
+        const adderId = myMember.from.id;
+        
+        if (['member', 'administrator'].includes(newStatus)) {
+            if (!db.groups) db.groups = [];
+            if (!db.groups.includes(String(chatId))) {
+                db.groups.push(String(chatId));
+                db.stats.totalGroups = db.groups.length;
+
+                // Tambah akses VIP 3 hari
+                if (!db.userGroups) db.userGroups = {};
+                if (!db.userGroups[String(adderId)]) db.userGroups[String(adderId)] = [];
+                if (!db.userGroups[String(adderId)].includes(String(chatId))) {
+                    db.userGroups[String(adderId)].push(String(chatId));
+                }
+
+                const threeDays = 3 * 24 * 60 * 60 * 1000;
+                const currentExpiry = db.accessExpiry?.[String(adderId)] || Date.now();
+                db.accessExpiry[String(adderId)] = Math.max(currentExpiry, Date.now()) + threeDays;
+                
+                await saveDB(db);
+                const expDate = new Date(db.accessExpiry[String(adderId)]).toLocaleString('id-ID');
+
+                // Notifikasi ke Grup
+                await sendMsg(chatId, 
+                    `✅ <b>Terima kasih sudah mengundang bot ke ${chatTitle}!</b>\n\n` +
+                    `👤 Spesial untuk pengundang (<a href="tg://user?id=${adderId}">Klik Disini</a>):\n` +
+                    `Kamu otomatis mendapatkan VIP Akses <b>3 Hari</b> untuk Share Massal!\n` +
+                    `⏰ Berlaku sampai: ${expDate}\n\n` +
+                    `Silakan kembali ke Private Chat Bot dan ketik /start untuk menggunakan fitur.`
+                );
+
+                // Notifikasi ke Private Chat Pengundang
+                try {
+                    await sendMsg(adderId,
+                        `🎉 <b>Akses VIP Share Diberikan!</b>\n\n` +
+                        `Terima kasih telah menambahkan bot ke grup <b>${chatTitle}</b>\n` +
+                        `⏰ Kamu mendapat tambahan akses: <b>3 hari</b>\n` +
+                        `📅 Total masa aktif sampai: ${expDate}\n\n` +
+                        `Gunakan perintah <code>/sharemsg</code> di chat ini untuk mulai sebar iklanmu!`
+                    );
+                } catch (error) {}
+            }
+        } else if (['left', 'kicked'].includes(newStatus)) {
+            // Jika bot ditendang, hapus dari database
+            if (db.groups && db.groups.includes(String(chatId))) {
+                db.groups = db.groups.filter(g => g !== String(chatId));
+                db.stats.totalGroups = db.groups.length;
+                await saveDB(db);
+            }
+        }
+        return res.status(200).json({ status: 'OK' });
+    }
 
     // ==================== CALLBACK QUERY ====================
     if (body.callback_query) {
@@ -173,7 +231,6 @@ module.exports = async (req, res) => {
             });
         } catch (error) {}
 
-        // Check join channel
         if (data === 'check_join') {
             if (await checkChannel(userId)) {
                 await sendMsg(chatId, '✅ Berhasil memverifikasi!\n\nSilakan ketik /start untuk membuka menu utama.');
@@ -188,12 +245,9 @@ module.exports = async (req, res) => {
             return res.status(200).json({ status: 'OK' });
         }
 
-        // Share copy
         if (data.startsWith('share_copy_')) {
             const [, , fromChatId, replyMsgId, ownerId] = data.split('_');
-            if (String(userId) !== ownerId) {
-                return res.status(200).json({ status: 'OK' });
-            }
+            if (String(userId) !== ownerId) return res.status(200).json({ status: 'OK' });
 
             if (!hasAccess(db, userId)) {
                 await sendMsg(chatId, '⏰ <b>Akses kamu sudah habis!</b>\nSilakan tambahkan bot ini ke 1 grup baru untuk memperpanjang durasi akses selama 3 hari.');
@@ -225,7 +279,7 @@ module.exports = async (req, res) => {
                         });
                     } catch (error) {}
                 }
-                await new Promise(r => setTimeout(r, 350)); // Delay aman menghindari rate limit API
+                await new Promise(r => setTimeout(r, 350));
             }
 
             db.stats.totalShares += ok;
@@ -233,7 +287,6 @@ module.exports = async (req, res) => {
             return res.status(200).json({ status: 'OK' });
         }
 
-        // Share forward
         if (data.startsWith('share_forward_')) {
             const [, , fromChatId, replyMsgId, ownerId] = data.split('_');
             if (String(userId) !== ownerId) return res.status(200).json({ status: 'OK' });
@@ -272,70 +325,56 @@ module.exports = async (req, res) => {
         const chatId = msg.chat.id;
         const userId = msg.from.id;
         const username = msg.from.username || msg.from.first_name || 'User';
+        const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
 
-        // ==================== BOT DITAMBAHKAN KE GRUP ====================
+        // 2. DETEKSI TAMBAHAN (FALLBACK VIA NEW_CHAT_MEMBERS)
         if (msg.new_chat_members || msg.group_chat_created) {
             const newMembers = msg.new_chat_members || [];
-            const botAdded = newMembers.some(m => m.is_bot && m.username === (body?.result?.username || ''));
+            // Deteksi 100% Akurat Menggunakan ID BOT
+            const botAdded = newMembers.some(m => String(m.id) === String(BOT_ID));
             
             if (botAdded || msg.group_chat_created) {
                 const adderId = msg.from.id;
+                const chatTitle = msg.chat.title || 'Grup';
                 
                 if (!db.groups) db.groups = [];
+                // Jika my_chat_member tidak tertangkap, baris ini akan mengaturnya
                 if (!db.groups.includes(String(chatId))) {
                     db.groups.push(String(chatId));
                     db.stats.totalGroups = db.groups.length;
-                }
 
-                // Tambah akses 3 hari (akumulasi)
-                if (!db.userGroups) db.userGroups = {};
-                if (!db.userGroups[String(adderId)]) db.userGroups[String(adderId)] = [];
-                if (!db.userGroups[String(adderId)].includes(String(chatId))) {
-                    db.userGroups[String(adderId)].push(String(chatId));
-                }
+                    if (!db.userGroups) db.userGroups = {};
+                    if (!db.userGroups[String(adderId)]) db.userGroups[String(adderId)] = [];
+                    if (!db.userGroups[String(adderId)].includes(String(chatId))) {
+                        db.userGroups[String(adderId)].push(String(chatId));
+                    }
 
-                const threeDays = 3 * 24 * 60 * 60 * 1000;
-                const currentExpiry = db.accessExpiry?.[String(adderId)] || Date.now();
-                db.accessExpiry[String(adderId)] = Math.max(currentExpiry, Date.now()) + threeDays;
-                
-                await saveDB(db);
-
-                const expDate = new Date(db.accessExpiry[String(adderId)]).toLocaleString('id-ID');
-                await sendMsg(chatId, 
-                    `✅ <b>Terima kasih sudah mengundang bot!</b>\n\n` +
-                    `👤 Spesial untuk <a href="tg://user?id=${adderId}">${msg.from.first_name}</a>:\n` +
-                    `Kamu otomatis mendapatkan VIP Akses <b>3 Hari</b> untuk share massal!\n` +
-                    `⏰ Berlaku sampai: ${expDate}\n\n` +
-                    `Silakan kembali ke Private Chat Bot dan ketik /start untuk menggunakan fitur.`
-                );
-
-                try {
-                    await sendMsg(adderId,
-                        `🎉 <b>Akses VIP Share Diberikan!</b>\n\n` +
-                        `Terima kasih telah menambahkan bot ke grup <b>${msg.chat.title || 'Grup'}</b>\n` +
-                        `⏰ Kamu mendapat tambahan akses: <b>3 hari</b>\n` +
-                        `📅 Total masa aktif sampai: ${expDate}\n\n` +
-                        `Gunakan perintah <code>/sharemsg</code> untuk mulai sebar iklanmu!`
-                    );
-                } catch (error) {}
-
-                return res.status(200).json({ status: 'OK' });
-            }
-        }
-
-        // ==================== BOT DIKELUARKAN DARI GRUP ====================
-        if (msg.left_chat_member) {
-            if (msg.left_chat_member.is_bot) {
-                if (db.groups) {
-                    db.groups = db.groups.filter(g => g !== String(chatId));
-                    db.stats.totalGroups = db.groups.length;
+                    const threeDays = 3 * 24 * 60 * 60 * 1000;
+                    const currentExpiry = db.accessExpiry?.[String(adderId)] || Date.now();
+                    db.accessExpiry[String(adderId)] = Math.max(currentExpiry, Date.now()) + threeDays;
                     await saveDB(db);
+                    
+                    const expDate = new Date(db.accessExpiry[String(adderId)]).toLocaleString('id-ID');
+                    await sendMsg(chatId, `✅ <b>Bot Siap! (Terdeteksi via Join)</b>\n\n👤 Pengundang mendapat VIP 3 Hari sampai: ${expDate}\nKetik /start di PM untuk memakai bot.`);
                 }
                 return res.status(200).json({ status: 'OK' });
             }
         }
 
-        // ==================== REGISTER USER ====================
+        // 3. DETEKSI PASIF: Jika ada chat / command di grup tapi grup belum didaftarkan
+        if (isGroup && text.startsWith('/')) {
+            if (!db.groups) db.groups = [];
+            if (!db.groups.includes(String(chatId))) {
+                db.groups.push(String(chatId));
+                db.stats.totalGroups = db.groups.length;
+                await saveDB(db);
+            }
+        }
+
+        // ==================== HANYA PROSES PESAN PRIVATE (JAPRI) ====================
+        if (isGroup) return res.status(200).json({ status: 'OK' });
+
+        // REGISTER USER
         if (!db.users) db.users = [];
         if (!db.users.includes(String(userId))) {
             db.users.push(String(userId));
@@ -343,9 +382,9 @@ module.exports = async (req, res) => {
             await saveDB(db);
         }
 
-        // ==================== BLACKLIST CHECK ====================
+        // BLACKLIST CHECK
         if ((db.blacklist || []).includes(String(userId))) {
-            return res.status(200).json({ status: 'OK' }); // User di-banned, bot dicuekin
+            return res.status(200).json({ status: 'OK' });
         }
 
         // ==================== /start ====================
@@ -382,6 +421,10 @@ module.exports = async (req, res) => {
                 accessInfo = '❌ <b>Tidak Aktif</b> (Tambahkan bot ke 1 grup untuk 3 hari akses)';
             }
 
+            // Menerapkan Angka Base + Jumlah Real untuk Fake Stats
+            const displayUsers = db.users.length + FAKE_USERS;
+            const displayGroups = (db.groups || []).length + FAKE_GROUPS;
+
             await sendMsg(chatId,
                 `🤖 <b>JASHER BOT - AUTO SHARE & FORWARD</b>\n\n` +
                 `Halo, <b>${username}</b>! 👋\n` +
@@ -394,15 +437,15 @@ module.exports = async (req, res) => {
                 `🔹 <b>/setpesan</b> — <i>(Simpan Format)</i>\n` +
                 `↳ Reply pesan iklan utamamu dengan command ini. Pesan tersebut akan masuk ke memori bot untuk digunakan pada mode Auto Share.\n\n` +
                 `🔹 <b>/auto on</b> atau <b>/auto off</b> — <i>(Mode Otomatis)</i>\n` +
-                `↳ Hidupkan ini jika kamu ingin bot mengirimkan pesan yang sudah kamu simpan (via /setpesan) terus-menerus ke semua grup secara otomatis setiap beberapa saat.\n\n` +
+                `↳ Hidupkan ini jika kamu ingin bot mengirimkan pesan yang sudah kamu simpan (via /setpesan) terus-menerus ke semua grup secara otomatis setiap beberapa menit.\n\n` +
                 `🔹 <b>/status</b> — <i>(Cek VIP)</i>\n` +
                 `↳ Tampilkan sisa durasi langganan/VIP dan daftar partisipasimu.\n\n` +
                 `=============================\n` +
                 `📊 <b>STATUS AKUN KAMU</b>\n` +
                 `├ Hak Akses: ${accessInfo}\n` +
                 `├ Kontribusi Grup: ${userGroupCount} Grup\n` +
-                `├ Total Server User: ${db.users.length}\n` +
-                `└ Total Database Grup: ${(db.groups || []).length}\n\n` +
+                `├ Total Server User: ${displayUsers}\n` +
+                `└ Total Database Grup: ${displayGroups}\n\n` +
                 `⚠️ <b>TIPS:</b> Ingin akses gratis? Cukup masukkan bot ini ke dalam 1 Grup obrolan, kamu akan otomatis diberi akses selama 3 Hari!\n\n` +
                 `👨‍💻 Developer: ${DEVELOPER}`
             );
@@ -505,7 +548,7 @@ module.exports = async (req, res) => {
                         });
                     } catch (error) {}
                 }
-                await new Promise(r => setTimeout(r, 100)); // Delay aman agar Telegram tidak ban server
+                await new Promise(r => setTimeout(r, 100));
             }
 
             db.stats.totalShares += ok;
@@ -558,11 +601,14 @@ module.exports = async (req, res) => {
         if (text === '/owner') {
             if (!isOwner(userId)) return sendMsg(chatId, '❌ Command tidak dikenali atau Anda tidak punya wewenang.');
 
+            const displayUsers = db.users.length + FAKE_USERS;
+            const displayGroups = (db.groups || []).length + FAKE_GROUPS;
+
             await sendMsg(chatId,
                 `👑 <b>CONTROL PANEL - COMMAND CENTER</b>\n\n` +
                 `📊 <b>Data Global Sistem:</b>\n` +
-                `├ Register User: ${db.users.length}\n` +
-                `├ Grup Terjangkau: ${(db.groups || []).length}\n` +
+                `├ Terlihat (Display): ${displayUsers} Users | ${displayGroups} Groups\n` +
+                `├ Real/Asli (System): ${db.users.length} Users | ${(db.groups || []).length} Groups\n` +
                 `└ Total Distribusi Share: ${db.stats?.totalShares || 0}\n\n` +
                 `🔧 <b>Daftar Perintah Eksekutif:</b>\n` +
                 `/broadcast — Siaran ke semua PM bot\n` +
@@ -594,7 +640,7 @@ module.exports = async (req, res) => {
         if (text.startsWith('/removeowner') && isOwner(userId)) {
             const id = text.replace('/removeowner', '').trim();
             const idx = OWNER_IDS.indexOf(id);
-            if (idx > 0) { // idx > 0 mencegah developer utama/root terhapus gak sengaja
+            if (idx > 0) {
                 OWNER_IDS.splice(idx, 1);
                 await sendMsg(chatId, `✅ Akses Owner ID ${id} dicabut!`);
             }
@@ -648,7 +694,7 @@ module.exports = async (req, res) => {
         if (text === '/listgroups' && isOwner(userId)) {
             const groups = db.groups || [];
             const list = groups.slice(-30).map((g, i) => `${i + 1}. <code>${g}</code>`).join('\n');
-            await sendMsg(chatId, `📋 <b>Log Top 30 Grup Aktif</b> (Total: ${groups.length})\n\n${list || 'Masih kosong melompong'}`);
+            await sendMsg(chatId, `📋 <b>Log Top 30 Grup Aktif</b> (Total Real: ${groups.length})\n\n${list || 'Masih kosong melompong'}`);
             return res.status(200).json({ status: 'OK' });
         }
 
@@ -739,4 +785,4 @@ setInterval(async () => {
     } catch (error) {
         console.error("AutoShare Loop Error:", error.message);
     }
-}, 30000); // Mengecek trigger setiap 30 Detik
+}, 30000);
