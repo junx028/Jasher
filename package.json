@@ -1,0 +1,8 @@
+{
+  "name": "jasher-bot",
+  "version": "1.0.0",
+  "description": "Jasher Bot - Auto Share System",
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  }
+}
