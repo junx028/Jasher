@@ -9,7 +9,7 @@ const GIST_ID = process.env.GIST_ID;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GIST_API = `https://api.github.com/gists/${GIST_ID}`;
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
-const VERCEL_URL = process.env.VERCEL_URL || 'https://limit-bot.vercel.app';
+const VERCEL_URL = 'https://veldora-jasher.vercel.app';
 
 // ==================== DATABASE ====================
 async function getDB() {
