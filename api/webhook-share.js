@@ -2,7 +2,6 @@ const fetch = require('node-fetch');
 
 // ==================== CONFIG ====================
 const BOT_TOKEN = process.env.BOT_TOKEN;
-// Ekstrak ID Bot dari Token untuk akurasi deteksi grup 100%
 const BOT_ID = BOT_TOKEN ? BOT_TOKEN.split(':')[0] : ''; 
 
 const OWNER_IDS = (process.env.OWNER_IDS || '').split(',').map(id => id.trim());
@@ -12,10 +11,9 @@ const GIST_ID = process.env.GIST_ID;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GIST_API = `https://api.github.com/gists/${GIST_ID}`;
 const TELEGRAM_API = `https://api.telegram.org/bot${BOT_TOKEN}`;
-const VERCEL_URL = process.env.VERCEL_URL || 'https://limit-bot.vercel.app';
+const VERCEL_URL = 'https://veldora-jasher.vercel.app';
 
 // ==================== FAKE STATS SETTINGS ====================
-// Angka dasar yang akan ditambah dengan jumlah aslinya agar terlihat ramai
 const FAKE_USERS = 560;
 const FAKE_GROUPS = 247;
 
@@ -156,8 +154,7 @@ module.exports = async (req, res) => {
     const body = req.body;
     const db = await getDB();
 
-    // ==================== 1. DETEKSI BOT DITAMBAHKAN KE GRUP (MY_CHAT_MEMBER) ====================
-    // Ini adalah metode paling agresif & akurat untuk mendeteksi grup baru
+    // ==================== 1. DETEKSI BOT DITAMBAHKAN KE GRUP ====================
     if (body.my_chat_member) {
         const myMember = body.my_chat_member;
         const chatId = myMember.chat.id;
@@ -171,7 +168,6 @@ module.exports = async (req, res) => {
                 db.groups.push(String(chatId));
                 db.stats.totalGroups = db.groups.length;
 
-                // Tambah akses VIP 3 hari
                 if (!db.userGroups) db.userGroups = {};
                 if (!db.userGroups[String(adderId)]) db.userGroups[String(adderId)] = [];
                 if (!db.userGroups[String(adderId)].includes(String(chatId))) {
@@ -185,7 +181,6 @@ module.exports = async (req, res) => {
                 await saveDB(db);
                 const expDate = new Date(db.accessExpiry[String(adderId)]).toLocaleString('id-ID');
 
-                // Notifikasi ke Grup
                 await sendMsg(chatId, 
                     `✅ <b>Terima kasih sudah mengundang bot ke ${chatTitle}!</b>\n\n` +
                     `👤 Spesial untuk pengundang (<a href="tg://user?id=${adderId}">Klik Disini</a>):\n` +
@@ -194,7 +189,6 @@ module.exports = async (req, res) => {
                     `Silakan kembali ke Private Chat Bot dan ketik /start untuk menggunakan fitur.`
                 );
 
-                // Notifikasi ke Private Chat Pengundang
                 try {
                     await sendMsg(adderId,
                         `🎉 <b>Akses VIP Share Diberikan!</b>\n\n` +
@@ -206,7 +200,6 @@ module.exports = async (req, res) => {
                 } catch (error) {}
             }
         } else if (['left', 'kicked'].includes(newStatus)) {
-            // Jika bot ditendang, hapus dari database
             if (db.groups && db.groups.includes(String(chatId))) {
                 db.groups = db.groups.filter(g => g !== String(chatId));
                 db.stats.totalGroups = db.groups.length;
@@ -245,6 +238,9 @@ module.exports = async (req, res) => {
             return res.status(200).json({ status: 'OK' });
         }
 
+        // ==============================================================
+        // PERBAIKAN BUG LAG: SHARE COPY BERJALAN DI BACKGROUND TUGAS
+        // ==============================================================
         if (data.startsWith('share_copy_')) {
             const [, , fromChatId, replyMsgId, ownerId] = data.split('_');
             if (String(userId) !== ownerId) return res.status(200).json({ status: 'OK' });
@@ -260,33 +256,45 @@ module.exports = async (req, res) => {
                 return res.status(200).json({ status: 'OK' }); 
             }
 
-            let ok = 0, fail = 0;
-            const statusMsg = await sendMsg(chatId, '📡 Sedang memulai proses share massal...');
+            const statusMsg = await sendMsg(chatId, '📡 Sedang memulai proses share massal (Background Process)...');
 
-            for (let i = 0; i < groups.length; i++) {
-                (await copyMsg(groups[i], fromChatId, parseInt(replyMsgId))) ? ok++ : fail++;
-                if ((i + 1) % 5 === 0 || i === groups.length - 1) {
-                    const pct = Math.round(((i + 1) / groups.length) * 100);
-                    try {
-                        await fetch(`${TELEGRAM_API}/editMessageText`, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                chat_id: chatId,
-                                message_id: statusMsg?.result?.message_id || messageId,
-                                text: `📡 <b>Progres Share Manual</b>\n\n✅ Berhasil: ${ok} | ❌ Gagal: ${fail}\n${progressBar(pct)}\n\n⏳ Dikirim ke: ${i + 1}/${groups.length} grup`,
-                                parse_mode: 'HTML'
-                            })
-                        });
-                    } catch (error) {}
+            // 1. JAWAB TELEGRAM SEKARANG JUGA AGAR TIDAK MACET/TIMEOUT
+            res.status(200).json({ status: 'OK' });
+
+            // 2. JALANKAN PROSES LAMA SECARA ASYNCHRONOUS DI BELAKANG LAYAR
+            (async () => {
+                let ok = 0, fail = 0;
+                for (let i = 0; i < groups.length; i++) {
+                    (await copyMsg(groups[i], fromChatId, parseInt(replyMsgId))) ? ok++ : fail++;
+                    
+                    if ((i + 1) % 5 === 0 || i === groups.length - 1) {
+                        const pct = Math.round(((i + 1) / groups.length) * 100);
+                        try {
+                            await fetch(`${TELEGRAM_API}/editMessageText`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    chat_id: chatId,
+                                    message_id: statusMsg?.result?.message_id || messageId,
+                                    text: `📡 <b>Progres Share Manual</b>\n\n✅ Berhasil: ${ok} | ❌ Gagal: ${fail}\n${progressBar(pct)}\n\n⏳ Dikirim ke: ${i + 1}/${groups.length} grup`,
+                                    parse_mode: 'HTML'
+                                })
+                            });
+                        } catch (error) {}
+                    }
+                    await new Promise(r => setTimeout(r, 350));
                 }
-                await new Promise(r => setTimeout(r, 350));
-            }
-
-            db.stats.totalShares += ok;
-            await saveDB(db);
-            return res.status(200).json({ status: 'OK' });
+                db.stats.totalShares += ok;
+                await saveDB(db);
+                
+                await sendMsg(chatId, `🎉 <b>Share Massal Selesai!</b>\nPesan berhasil dikirim ke ${ok} grup.`);
+            })();
+            
+            return; // Hentikan eksekusi kode utama karena response sudah dikirim di atas
         }
 
+        // ==============================================================
+        // PERBAIKAN BUG LAG: SHARE FORWARD BERJALAN DI BACKGROUND
+        // ==============================================================
         if (data.startsWith('share_forward_')) {
             const [, , fromChatId, replyMsgId, ownerId] = data.split('_');
             if (String(userId) !== ownerId) return res.status(200).json({ status: 'OK' });
@@ -302,17 +310,38 @@ module.exports = async (req, res) => {
                 return res.status(200).json({ status: 'OK' }); 
             }
 
-            let ok = 0, fail = 0;
-            for (let i = 0; i < groups.length; i++) {
-                (await forwardMsg(groups[i], fromChatId, parseInt(replyMsgId))) ? ok++ : fail++;
-                if ((i + 1) % 10 === 0 || i === groups.length - 1) {
-                    await sendMsg(chatId, `📡 Forward ke ${i + 1}/${groups.length} Grup\n✅ Sukses: ${ok} | ❌ Gagal: ${fail}`);
+            const statusMsg = await sendMsg(chatId, '📡 Sedang memulai proses forward massal...');
+
+            // 1. JAWAB TELEGRAM SEKARANG JUGA
+            res.status(200).json({ status: 'OK' });
+
+            // 2. PROSES BELAKANG LAYAR
+            (async () => {
+                let ok = 0, fail = 0;
+                for (let i = 0; i < groups.length; i++) {
+                    (await forwardMsg(groups[i], fromChatId, parseInt(replyMsgId))) ? ok++ : fail++;
+                    
+                    if ((i + 1) % 5 === 0 || i === groups.length - 1) {
+                        const pct = Math.round(((i + 1) / groups.length) * 100);
+                        try {
+                            await fetch(`${TELEGRAM_API}/editMessageText`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    chat_id: chatId,
+                                    message_id: statusMsg?.result?.message_id || messageId,
+                                    text: `📡 <b>Progres Forward</b>\n\n✅ Berhasil: ${ok} | ❌ Gagal: ${fail}\n${progressBar(pct)}\n\n⏳ Dikirim ke: ${i + 1}/${groups.length} grup`,
+                                    parse_mode: 'HTML'
+                                })
+                            });
+                        } catch (error) {}
+                    }
+                    await new Promise(r => setTimeout(r, 350));
                 }
-                await new Promise(r => setTimeout(r, 350));
-            }
-            db.stats.totalShares += ok;
-            await saveDB(db);
-            return res.status(200).json({ status: 'OK' });
+                db.stats.totalShares += ok;
+                await saveDB(db);
+            })();
+
+            return;
         }
 
         return res.status(200).json({ status: 'OK' });
@@ -327,18 +356,14 @@ module.exports = async (req, res) => {
         const username = msg.from.username || msg.from.first_name || 'User';
         const isGroup = msg.chat.type === 'group' || msg.chat.type === 'supergroup';
 
-        // 2. DETEKSI TAMBAHAN (FALLBACK VIA NEW_CHAT_MEMBERS)
         if (msg.new_chat_members || msg.group_chat_created) {
             const newMembers = msg.new_chat_members || [];
-            // Deteksi 100% Akurat Menggunakan ID BOT
             const botAdded = newMembers.some(m => String(m.id) === String(BOT_ID));
             
             if (botAdded || msg.group_chat_created) {
                 const adderId = msg.from.id;
-                const chatTitle = msg.chat.title || 'Grup';
                 
                 if (!db.groups) db.groups = [];
-                // Jika my_chat_member tidak tertangkap, baris ini akan mengaturnya
                 if (!db.groups.includes(String(chatId))) {
                     db.groups.push(String(chatId));
                     db.stats.totalGroups = db.groups.length;
@@ -355,13 +380,13 @@ module.exports = async (req, res) => {
                     await saveDB(db);
                     
                     const expDate = new Date(db.accessExpiry[String(adderId)]).toLocaleString('id-ID');
-                    await sendMsg(chatId, `✅ <b>Bot Siap! (Terdeteksi via Join)</b>\n\n👤 Pengundang mendapat VIP 3 Hari sampai: ${expDate}\nKetik /start di PM untuk memakai bot.`);
+                    await sendMsg(chatId, `✅ <b>Bot Siap Digunakan!</b>\n\n👤 Pengundang mendapat VIP 3 Hari sampai: ${expDate}\nKetik /start di PM untuk memakai bot.`);
                 }
                 return res.status(200).json({ status: 'OK' });
             }
         }
 
-        // 3. DETEKSI PASIF: Jika ada chat / command di grup tapi grup belum didaftarkan
+        // DETEKSI PASIF GRUP BARU
         if (isGroup && text.startsWith('/')) {
             if (!db.groups) db.groups = [];
             if (!db.groups.includes(String(chatId))) {
@@ -371,7 +396,6 @@ module.exports = async (req, res) => {
             }
         }
 
-        // ==================== HANYA PROSES PESAN PRIVATE (JAPRI) ====================
         if (isGroup) return res.status(200).json({ status: 'OK' });
 
         // REGISTER USER
@@ -421,7 +445,6 @@ module.exports = async (req, res) => {
                 accessInfo = '❌ <b>Tidak Aktif</b> (Tambahkan bot ke 1 grup untuk 3 hari akses)';
             }
 
-            // Menerapkan Angka Base + Jumlah Real untuk Fake Stats
             const displayUsers = db.users.length + FAKE_USERS;
             const displayGroups = (db.groups || []).length + FAKE_GROUPS;
 
@@ -521,7 +544,9 @@ module.exports = async (req, res) => {
             return res.status(200).json({ status: 'OK' });
         }
 
-        // ==================== /broadcast (Owner) ====================
+        // ==============================================================
+        // PERBAIKAN BUG LAG: BROADCAST OWNER BERJALAN DI BACKGROUND
+        // ==============================================================
         if (text === '/broadcast') {
             if (!isOwner(userId)) return sendMsg(chatId, '❌ Perintah ditolak! Ini adalah zona khusus Developer/Owner.');
             if (!msg.reply_to_message) return sendMsg(chatId, '⚠️ Reply pesan yang mau di-broadcast!');
@@ -529,31 +554,40 @@ module.exports = async (req, res) => {
             const users = db.users || [];
             if (!users.length) return sendMsg(chatId, '❌ Database user masih kosong!');
 
-            let ok = 0, fail = 0;
             const replyId = msg.reply_to_message.message_id;
-            const statusMsg = await sendMsg(chatId, '📡 Inisialisasi Broadcast ke ' + users.length + ' User...');
+            const statusMsg = await sendMsg(chatId, '📡 Memulai Inisialisasi Broadcast Background...');
 
-            for (let i = 0; i < users.length; i++) {
-                (await copyMsg(users[i], chatId, replyId)) ? ok++ : fail++;
-                if ((i + 1) % 10 === 0 || i === users.length - 1) {
-                    try {
-                        await fetch(`${TELEGRAM_API}/editMessageText`, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                chat_id: chatId,
-                                message_id: statusMsg?.result?.message_id,
-                                text: `📡 <b>Proses Broadcast PM</b>\n\nTarget: ${users.length} Users\n✅ Sukses: ${ok} | ❌ Gagal (Blokir Bot): ${fail}\n\n⏳ Progres: ${i + 1}/${users.length}`,
-                                parse_mode: 'HTML'
-                            })
-                        });
-                    } catch (error) {}
+            // 1. RESPON KE TELEGRAM AGAR TIDAK MACET
+            res.status(200).json({ status: 'OK' });
+
+            // 2. JALANKAN PROSES LAMA DI BELAKANG LAYAR
+            (async () => {
+                let ok = 0, fail = 0;
+                for (let i = 0; i < users.length; i++) {
+                    (await copyMsg(users[i], chatId, replyId)) ? ok++ : fail++;
+                    
+                    if ((i + 1) % 10 === 0 || i === users.length - 1) {
+                        try {
+                            await fetch(`${TELEGRAM_API}/editMessageText`, {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    chat_id: chatId,
+                                    message_id: statusMsg?.result?.message_id,
+                                    text: `📡 <b>Proses Broadcast PM</b>\n\nTarget: ${users.length} Users\n✅ Sukses: ${ok} | ❌ Gagal (Blokir Bot): ${fail}\n\n⏳ Progres: ${i + 1}/${users.length}`,
+                                    parse_mode: 'HTML'
+                                })
+                            });
+                        } catch (error) {}
+                    }
+                    await new Promise(r => setTimeout(r, 100));
                 }
-                await new Promise(r => setTimeout(r, 100));
-            }
 
-            db.stats.totalShares += ok;
-            await saveDB(db);
-            return res.status(200).json({ status: 'OK' });
+                db.stats.totalShares += ok;
+                await saveDB(db);
+                await sendMsg(chatId, `🎉 <b>Broadcast PM Selesai!</b>\nBerhasil dikirim ke ${ok} orang.`);
+            })();
+
+            return;
         }
 
         // ==================== /setpesan ====================
@@ -746,7 +780,6 @@ module.exports = async (req, res) => {
 };
 
 // ==================== AUTO SHARE LOOP ====================
-// Loop background ini berfungsi baik jika di-hosting VPS (Node/Screen/PM2).
 setInterval(async () => {
     try {
         const db = await getDB();
@@ -756,14 +789,13 @@ setInterval(async () => {
         for (const [userId, config] of Object.entries(autoShares)) {
             if (!config.active) continue;
             
-            // Evaluasi ulang akses VIP user di setiap menitnya
             if (!hasAccess(db, userId)) {
                 delete autoShares[userId];
                 continue;
             }
 
             const now = Date.now();
-            if (now - config.lastSent < 60000) continue; // Rate Limit per User: Setiap 60 Detik sekali
+            if (now - config.lastSent < 60000) continue; 
 
             config.lastSent = now;
             config.round++;
@@ -771,14 +803,13 @@ setInterval(async () => {
             let ok = 0;
             for (const groupId of groups) {
                 if (await copyMsg(groupId, config.chatId, config.messageId)) ok++;
-                await new Promise(r => setTimeout(r, 400)); // Delay antar grup agar bot tidak kena Flood-Limit
+                await new Promise(r => setTimeout(r, 400)); 
             }
 
             db.stats.totalShares += ok;
             await saveDB(db);
 
             try {
-                // Notifikasi Logistik ke User Pemilik Iklan
                 await sendMsg(userId, `🔄 <b>Laporan Auto Share Loop #${config.round}</b>\n\n✅ Pengiriman Sukses: ${ok} grup\n❌ Pengiriman Gagal: ${groups.length - ok} grup`);
             } catch (error) {}
         }
