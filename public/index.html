@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jasher Bot | Share System</title>
+    <meta name="description" content="Bot Telegram auto share ke ribuan grup. Gratis, cepat, tanpa ribet.">
+    <meta property="og:title" content="Jasher Bot | Auto Share System">
+    <meta property="og:description" content="Share pesan ke semua grup dalam 1 klik. 100% Gratis!">
+    <meta name="theme-color" content="#00ff88">
+    
+    <style>
+        :root {
+            --bg: #0a0e17;
+            --card: #111827;
+            --neon: #00ff88;
+            --pink: #ff2d78;
+            --blue: #00d4ff;
+            --text: #e0e0e0;
+            --text2: #8892a4;
+            --border: #1e293b;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            line-height: 1.7;
+            overflow-x: hidden;
+        }
+
+        /* Grid Background */
+        .grid-bg {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            background-image: 
+                linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        /* Scanline */
+        .scanline {
+            position: fixed;
+            top: -100%;
+            left: 0;
+            width: 100%;
+            height: 150px;
+            pointer-events: none;
+            z-index: 1;
+            background: linear-gradient(0deg, transparent, rgba(0,255,136,0.02), transparent);
+            animation: scan 8s linear infinite;
+        }
+
+        @keyframes scan {
+            0% { top: -150px; }
+            100% { top: 100%; }
+        }
+
+        .container {
+            max-width: 680px;
+            margin: 0 auto;
+            padding: 20px;
+            position: relative;
+            z-index: 2;
+        }
+
+        /* Glitch Header */
+        .header {
+            text-align: center;
+            padding: 50px 0 30px;
+        }
+
+        .logo {
+            width: 100px; height: 100px;
+            background: #111827;
+            border: 2px solid var(--neon);
+            border-radius: 20px;
+            margin: 0 auto 25px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+            box-shadow: 0 0 40px rgba(0,255,136,0.2), 0 0 80px rgba(0,255,136,0.1);
+            animation: glow 2s ease-in-out infinite;
+            position: relative;
+        }
+
+        .logo::after {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 22px;
+            border: 2px solid transparent;
+            background: linear-gradient(135deg, var(--neon), var(--pink), var(--blue)) border-box;
+            -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+            mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            opacity: 0.5;
+        }
+
+        @keyframes glow {
+            0%, 100% { box-shadow: 0 0 40px rgba(0,255,136,0.2); }
+            50% { box-shadow: 0 0 80px rgba(0,255,136,0.5), 0 0 120px rgba(255,45,120,0.2); }
+        }
+
+        .header h1 {
+            font-size: 2.4rem;
+            font-weight: 900;
+            letter-spacing: 2px;
+            background: linear-gradient(135deg, var(--neon), var(--blue), var(--pink));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            text-shadow: 0 0 60px rgba(0,255,136,0.3);
+        }
+
+        .header .badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border: 1px solid var(--neon);
+            border-radius: 50px;
+            color: var(--neon);
+            font-size: 0.75rem;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            margin-top: 12px;
+        }
+
+        /* Card */
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 16px;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 3px;
+            height: 100%;
+            background: var(--neon);
+            border-radius: 16px 0 0 16px;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .card:hover::before {
+            opacity: 1;
+        }
+
+        .card:hover {
+            border-color: rgba(0,255,136,0.3);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+
+        .card-title {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--neon);
+        }
+
+        .icon-box {
+            width: 40px; height: 40px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.3rem;
+            flex-shrink: 0;
+            border: 1px solid;
+        }
+
+        .icon-green { border-color: rgba(0,255,136,0.3); background: rgba(0,255,136,0.1); }
+        .icon-pink { border-color: rgba(255,45,120,0.3); background: rgba(255,45,120,0.1); }
+        .icon-blue { border-color: rgba(0,212,255,0.3); background: rgba(0,212,255,0.1); }
+        .icon-yellow { border-color: rgba(255,200,0,0.3); background: rgba(255,200,0,0.1); }
+
+        /* Feature list */
+        .feature-list {
+            list-style: none;
+        }
+
+        .feature-list li {
+            padding: 12px 0;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            font-size: 0.92rem;
+        }
+
+        .feature-list li:last-child { border-bottom: none; }
+
+        .feature-icon {
+            width: 22px; height: 22px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .fi-green { background: rgba(0,255,136,0.15); color: var(--neon); }
+        .fi-red { background: rgba(255,45,120,0.15); color: var(--pink); }
+        .fi-blue { background: rgba(0,212,255,0.15); color: var(--blue); }
+
+        /* Table */
+        .pro-con-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+        }
+
+        .pro-con-table th {
+            padding: 12px;
+            text-align: center;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-size: 0.75rem;
+            border-bottom: 2px solid var(--border);
+        }
+
+        .pro-con-table th:first-child { color: var(--neon); }
+        .pro-con-table th:last-child { color: var(--pink); }
+
+        .pro-con-table td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            vertical-align: top;
+        }
+
+        .pro-con-table tr:last-child td { border-bottom: none; }
+        .pro-con-table td:first-child { color: var(--neon); font-weight: 600; }
+        .pro-con-table td:last-child { color: var(--pink); }
+
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+        }
+
+        .stat-box {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 10px;
+            text-align: center;
+        }
+
+        .stat-val {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--neon);
+        }
+
+        .stat-lbl {
+            font-size: 0.68rem;
+            color: var(--text2);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-top: 4px;
+        }
+
+        /* Buttons */
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            font-size: 1rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-align: center;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            letter-spacing: 1px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-primary {
+            background: var(--neon);
+            color: #000;
+            box-shadow: 0 10px 40px rgba(0,255,136,0.3);
+            font-size: 1.1rem;
+            padding: 18px;
+        }
+
+        .btn-primary:hover {
+            box-shadow: 0 15px 60px rgba(0,255,136,0.5);
+            transform: translateY(-2px);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            border: 1px solid var(--pink);
+            color: var(--pink);
+            margin-top: 10px;
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255,45,120,0.1);
+            box-shadow: 0 10px 30px rgba(255,45,120,0.2);
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text2);
+            font-size: 0.8rem;
+        }
+
+        .footer-line {
+            width: 80px; height: 1px;
+            background: linear-gradient(90deg, transparent, var(--neon), transparent);
+            margin: 20px auto;
+        }
+
+        .footer a { color: var(--neon); text-decoration: none; }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--neon); border-radius: 2px; opacity: 0.5; }
+
+        /* Responsive */
+        @media (max-width: 480px) {
+            .header h1 { font-size: 1.7rem; }
+            .stats-grid { gap: 6px; }
+            .stat-box { padding: 12px 6px; }
+            .stat-val { font-size: 1.2rem; }
+            .container { padding: 12px; }
+            .card { padding: 18px; }
+            .pro-con-table { font-size: 0.75rem; }
+            .pro-con-table td, .pro-con-table th { padding: 8px 6px; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="grid-bg"></div>
+    <div class="scanline"></div>
+
+    <div class="container">
+
+        <!-- HEADER -->
+        <div class="header">
+            <div class="logo">📡</div>
+            <h1>JASHER BOT</h1>
+            <span class="badge">⚡ Auto Share System</span>
+        </div>
+
+        <!-- START BUTTON -->
+        <a href="https://t.me/YOUR_BOT_USERNAME" target="_blank" class="btn btn-primary">
+            🚀 START BOT SEKARANG
+        </a>
+        <a href="https://t.me/LeguminY" target="_blank" class="btn btn-secondary">
+            📢 Join @LeguminY
+        </a>
+
+        <!-- STATS -->
+        <div class="card" style="margin-top: 16px;">
+            <div class="card-title">
+                <span class="icon-box icon-green">📊</span>
+                Statistik Live
+            </div>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-val" id="totalUsers">-</div>
+                    <div class="stat-lbl">Users</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-val" id="totalGroups">-</div>
+                    <div class="stat-lbl">Groups</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-val" id="totalShares">-</div>
+                    <div class="stat-lbl">Shares</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- KELEBIHAN -->
+        <div class="card">
+            <div class="card-title">
+                <span class="icon-box icon-green">✅</span>
+                Kelebihan Bot
+            </div>
+            <ul class="feature-list">
+                <li>
+                    <span class="feature-icon fi-green">✓</span>
+                    <span><strong>100% Gratis</strong> — Semua fitur bisa dipakai tanpa biaya sepeserpun</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-green">✓</span>
+                    <span><strong>Share Cepat</strong> — Kirim pesan ke ribuan grup dalam hitungan detik</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-green">✓</span>
+                    <span><strong>Auto Share</strong> — Jadwalkan share otomatis, bot kerja 24 jam</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-green">✓</span>
+                    <span><strong>2 Mode Share</strong> — Copy Message (tanpa label) & Forward Message</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-green">✓</span>
+                    <span><strong>Broadcast</strong> — Kirim pesan massal ke semua user terdaftar</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-green">✓</span>
+                    <span><strong>Online 24/7</strong> — Dihosting di Vercel, selalu online tanpa henti</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-green">✓</span>
+                    <span><strong>Ringan & Cepat</strong> — Tanpa database berat, pakai GitHub Gist</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-green">✓</span>
+                    <span><strong>Owner Menu</strong> — Kontrol penuh: blacklist, tambah owner, backup</span>
+                </li>
+            </ul>
+        </div>
+
+        <!-- KEKURANGAN -->
+        <div class="card">
+            <div class="card-title">
+                <span class="icon-box icon-pink">⚠️</span>
+                Kekurangan Bot
+            </div>
+            <ul class="feature-list">
+                <li>
+                    <span class="feature-icon fi-red">✗</span>
+                    <span><strong>Wajib Join Channel</strong> — Harus join @LeguminY dulu sebelum pakai</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-red">✗</span>
+                    <span><strong>Grup Harus Ditambah Manual</strong> — Bot tidak auto-detect grup, harus invite dulu</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-red">✗</span>
+                    <span><strong>Jeda Share</strong> — Ada delay 300ms antar grup untuk hindari limit Telegram</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-red">✗</span>
+                    <span><strong>Database Gist</strong> — Pakai GitHub Gist, bisa lambat kalau data besar</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-red">✗</span>
+                    <span><strong>Tanpa Log Detail</strong> — Tidak ada history share yang lengkap</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-red">✗</span>
+                    <span><strong>Broadcast Hanya Owner</strong> — User biasa tidak bisa broadcast</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-red">✗</span>
+                    <span><strong>Vercel Cold Start</strong> — Kadang lambat saat pertama kali diakses setelah idle</span>
+                </li>
+                <li>
+                    <span class="feature-icon fi-red">✗</span>
+                    <span><strong>Tanpa Preview</strong> — Tidak bisa lihat preview pesan sebelum share</span>
+                </li>
+            </ul>
+        </div>
+
+        <!-- RINGKASAN -->
+        <div class="card">
+            <div class="card-title">
+                <span class="icon-box icon-blue">📋</span>
+                Ringkasan
+            </div>
+            <table class="pro-con-table">
+                <thead>
+                    <tr>
+                        <th>✅ Kelebihan</th>
+                        <th>❌ Kekurangan</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>100% Gratis</td>
+                        <td>Wajib join channel</td>
+                    </tr>
+                    <tr>
+                        <td>Share cepat massal</td>
+                        <td>Tambah grup manual</td>
+                    </tr>
+                    <tr>
+                        <td>Auto share 24/7</td>
+                        <td>Jeda 300ms antar share</td>
+                    </tr>
+                    <tr>
+                        <td>2 mode share</td>
+                        <td>Database Gist (lambat di data besar)</td>
+                    </tr>
+                    <tr>
+                        <td>Owner menu lengkap</td>
+                        <td>Broadcast khusus owner</td>
+                    </tr>
+                    <tr>
+                        <td>Hosting Vercel gratis</td>
+                        <td>Cold start Vercel</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- COMMANDS -->
+        <div class="card">
+            <div class="card-title">
+                <span class="icon-box icon-yellow">💻</span>
+                Perintah Bot
+            </div>
+            <ul class="feature-list">
+                <li><span style="color:var(--neon); font-family:monospace;">/start</span> — Menu utama</li>
+                <li><span style="color:var(--neon); font-family:monospace;">/sharemsg</span> — Share pesan ke grup</li>
+                <li><span style="color:var(--neon); font-family:monospace;">/broadcast</span> — Broadcast ke user (Owner)</li>
+                <li><span style="color:var(--neon); font-family:monospace;">/setpesan</span> — Simpan pesan auto</li>
+                <li><span style="color:var(--neon); font-family:monospace;">/auto on/off</span> — Auto share</li>
+                <li><span style="color:var(--neon); font-family:monospace;">/owner</span> — Menu owner</li>
+                <li><span style="color:var(--neon); font-family:monospace;">/help</span> — Bantuan</li>
+            </ul>
+        </div>
+
+        <!-- FOOTER -->
+        <div class="footer">
+            <div class="footer-line"></div>
+            <p>© 2025 <a href="https://t.me/LeguminY" target="_blank">@LeguminY</a> • Jasher Bot</p>
+            <p style="margin-top:4px; font-size:0.7rem;">Powered by Vercel • Created by @xnecz</p>
+        </div>
+
+    </div>
+
+    <script>
+        // Fetch stats
+        async function loadStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const json = await res.json();
+                if (json.success) {
+                    document.getElementById('totalUsers').textContent = (json.data.totalUsers || 0).toLocaleString();
+                    document.getElementById('totalGroups').textContent = (json.data.totalGroups || 0).toLocaleString();
+                    document.getElementById('totalShares').textContent = (json.data.totalShares || 0).toLocaleString();
+                }
+            } catch (e) {
+                document.getElementById('totalUsers').textContent = '...';
+                document.getElementById('totalGroups').textContent = '...';
+                document.getElementById('totalShares').textContent = '...';
+            }
+        }
+        loadStats();
+        setInterval(loadStats, 10000);
+    </script>
+
+</body>
+</html>
